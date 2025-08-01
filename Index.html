@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>SL Avgångar Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 1em;
+    }
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background: #fff;
+      padding: 1em;
+      border-radius: 8px;
+      box-shadow: 0 0 10px #ccc;
+    }
+    input, button, select {
+      width: 100%;
+      padding: 0.7em;
+      margin-top: 0.5em;
+      font-size: 1em;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+    #results ul {
+      padding-left: 1.2em;
+    }
+    #map {
+      height: 300px;
+      margin-top: 1em;
+      border-radius: 8px;
+    }
+    @media (min-width: 600px) {
+      input, button, select {
+        width: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SL Avgångar</h1>
+    <input id="stationInput" placeholder="Skriv station, t.ex. Odenplan" />
+    <button onclick="getDepartures()">Visa avgångar</button>
+    <button onclick="saveFavorite()">Spara som favorit</button>
+    <select id="favorites" onchange="loadFavorite()">
+      <option value="">Välj favoritstation</option>
+    </select>
+
+    <div id="results">Här visas avgångar...</div>
+    <div id="map"></div>
+  </div>
+
+  <script>
+    async function getDepartures() {
+      const station = document.getElementById('stationInput').value;
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = "Hämtar avgångar...";
+      try {
+        const stopRes = await fetch(`https://journeyplanner.integration.sl.se/v2/stop-finder?name_sf=${encodeURIComponent(station)}&type_sf=any&any_obj_filter_sf=2`);
+        const stopData = await stopRes.json();
+        const stop = stopData.stopFinder?.points?.[0];
+
+        if (!stop) {
+          resultsDiv.innerHTML = "Station hittades inte.";
+          return;
+        }
+
+        const stopId = stop.ref.sf;
+        const stopName = stop.name;
+        const lat = stop.coordY;
+        const lon = stop.coordX;
+
+        // Visa på karta
+        if (window.myMap) {
+          myMap.setView([lat, lon], 14);
+          marker.setLatLng([lat, lon]).bindPopup(stopName).openPopup();
+        } else {
+          window.myMap = L.map('map').setView([lat, lon], 14);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(myMap);
+          window.marker = L.marker([lat, lon]).addTo(myMap).bindPopup(stopName).openPopup();
+        }
+
+        // Hämta avgångar (resor till godtycklig plats)
+        const tripRes = await fetch(`https://journeyplanner.integration.sl.se/v2/trips?type_origin=any&name_origin=${stopId}&type_destination=coord&name_destination=18.0686:59.3293:WGS84&calc_number_of_trips=5`);
+        const tripData = await tripRes.json();
+
+        if (!tripData.trips || tripData.trips.length === 0) {
+          resultsDiv.innerHTML = "Inga avgångar hittades.";
+          return;
+        }
+
+        let output = `<h2>Avgångar från ${stopName}</h2><ul>`;
+        tripData.trips.forEach(trip => {
+          const leg = trip.legs[0];
+          const line = leg.transportation.name;
+          const direction = leg.direction;
+          const time = new Date(leg.origin.plannedDepartureTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          output += `<li><strong>${line}</strong> mot ${direction} – avgår kl ${time}</li>`;
+        });
+        output += "</ul>";
+        resultsDiv.innerHTML = output;
+
+      } catch (err) {
+        console.error(err);
+        resultsDiv.innerHTML = "Fel vid hämtning av data.";
+      }
+    }
+
+    function saveFavorite() {
+      const station = document.getElementById('stationInput').value.trim();
+      if (!station) return;
+      let favs = JSON.parse(localStorage.getItem('slFavorites') || '[]');
+      if (!favs.includes(station)) {
+        favs.push(station);
+        localStorage.setItem('slFavorites', JSON.stringify(favs));
+        updateFavoriteDropdown();
+      }
+    }
+
+    function loadFavorite() {
+      const selected = document.getElementById('favorites').value;
+      if (selected) {
+        document.getElementById('stationInput').value = selected;
+        getDepartures();
+      }
+    }
+
+    function updateFavoriteDropdown() {
+      const favs = JSON.parse(localStorage.getItem('slFavorites') || '[]');
+      const select = document.getElementById('favorites');
+      select.innerHTML = '<option value="">Välj favoritstation</option>';
+      favs.forEach(station => {
+        select.innerHTML += `<option value="${station}">${station}</option>`;
+      });
+    }
+
+    // Kör direkt vid laddning
+    updateFavoriteDropdown();
+  </script>
+</body>
+</html>
